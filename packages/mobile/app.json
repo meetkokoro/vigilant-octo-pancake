@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "LinkRadar",
+    "slug": "linkradar-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b0f19"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.linkradar.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0f19"
+      },
+      "package": "com.linkradar.mobile"
+    }
+  }
+}
