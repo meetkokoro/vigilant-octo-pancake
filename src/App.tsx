@@ -1,23 +1,68 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
-  StatusBar,
-  Image
+  ActivityIndicator,
 } from 'react-native';
 import { COLORS } from './styles/theme';
-import { Compass, MessageSquare, Users, User, Wifi, Battery, Signal } from 'lucide-react';
+import {
+  Compass,
+  MessageSquare,
+  Users,
+  User,
+  Wifi,
+  Battery,
+  Signal,
+  Flame,
+} from 'lucide-react';
 import LoginScreen from './screens/LoginScreen';
 import RadarScreen from './screens/RadarScreen';
+import DiscoverScreen from './screens/DiscoverScreen';
 import ConnectionsScreen from './screens/ConnectionsScreen';
 import ChatScreen from './screens/ChatScreen';
-import { Profile, CURRENT_USER, MOCK_PROFILES } from './utils/mockData';
+import ProfileScreen from './screens/ProfileScreen';
+import OnboardingScreen from './screens/OnboardingScreen';
+import LikesScreen from './screens/LikesScreen';
+import SettingsScreen from './screens/SettingsScreen';
+import MatchModal from './components/MatchModal';
+import SafetySheet from './components/SafetySheet';
+import { ToastProvider, useToast } from './components/Toast';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import {
+  Profile,
+  CURRENT_USER,
+  MOCK_PROFILES,
+  MOCK_INCOMING_LIKES,
+} from './utils/mockData';
+import {
+  DatingPreferences,
+  DEFAULT_PREFERENCES,
+  IncomingLike,
+  ReportReason,
+  SwipeDirection,
+} from './types/dating';
+import {
+  fetchDiscoveryFeed,
+  filterProfilesLocally,
+  fetchPreferences,
+  savePreferences,
+  deleteMyAccount,
+} from './services/profileService';
+import {
+  recordSwipe,
+  undoLastSwipe,
+  fetchIncomingLikes,
+  blockUser,
+  unblockUser,
+  fetchBlockedIds,
+  reportUser,
+} from './services/matchService';
 import confetti from 'canvas-confetti';
 
-type TabType = 'radar' | 'connections' | 'chat' | 'profile';
+type TabType = 'radar' | 'discover' | 'connections' | 'chat' | 'profile';
+type Overlay = 'none' | 'likes' | 'settings';
 
 export interface ChatMessage {
   id: string;
@@ -26,135 +71,391 @@ export interface ChatMessage {
   timestamp: string;
 }
 
-export default function App() {
-  const [user, setUser] = useState<Profile | null>(null);
+const TABS: { key: TabType; label: string; icon: React.ComponentType<any> }[] =
+  [
+    { key: 'radar', label: 'Radar', icon: Compass },
+    { key: 'discover', label: 'Discover', icon: Flame },
+    { key: 'connections', label: 'Matches', icon: Users },
+    { key: 'chat', label: 'Chat', icon: MessageSquare },
+    { key: 'profile', label: 'Profile', icon: User },
+  ];
+
+function nowLabel() {
+  return new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function LinkRadar() {
+  const {
+    profile,
+    user,
+    loading,
+    demoMode,
+    needsOnboarding,
+    signInAsDemoUser,
+    signOut,
+    saveProfile,
+    completeOnboarding,
+  } = useAuth();
+  const { showToast } = useToast();
+
   const [activeTab, setActiveTab] = useState<TabType>('radar');
+  const [overlay, setOverlay] = useState<Overlay>('none');
+
   const [likes, setLikes] = useState<string[]>([]);
-  const [matches, setMatches] = useState<string[]>(['1']); // Start with Elena matched for immediate chat demo
+  const [passes, setPasses] = useState<string[]>([]);
+  const [swipeHistory, setSwipeHistory] = useState<string[]>([]);
+  const [matches, setMatches] = useState<string[]>(['1']);
+  const [blockedIds, setBlockedIds] = useState<string[]>([]);
+  const [incomingLikes, setIncomingLikes] =
+    useState<IncomingLike[]>(MOCK_INCOMING_LIKES);
+
+  const [preferences, setPreferences] =
+    useState<DatingPreferences>(DEFAULT_PREFERENCES);
+  const [feed, setFeed] = useState<Profile[]>(MOCK_PROFILES);
+
   const [chatProfiles, setChatProfiles] = useState<Profile[]>(
-    MOCK_PROFILES.filter(p => p.id === '1')
+    MOCK_PROFILES.filter((p) => p.id === '1')
   );
-  
-  // Seed initial messages with Elena
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>({
     '1': [
       {
         id: 'm1',
         senderId: '1',
-        text: 'Hey! Nice to connect. Always looking for new coffee spots in SoMa. What\'s your current go-to?',
-        timestamp: '10:34 AM'
+        text: "Hey! Nice to connect. Always looking for new coffee spots in SoMa. What's your current go-to?",
+        timestamp: '10:34 AM',
       },
       {
         id: 'm2',
         senderId: 'currentUser',
         text: 'Hey Elena! Definitely "Sextant Coffee Roasters" on Folsom. They roast their own beans and have a great patio.',
-        timestamp: '10:37 AM'
+        timestamp: '10:37 AM',
       },
       {
         id: 'm3',
         senderId: '1',
-        text: 'Oh, I love Sextant! Their Ethiopian pour-over is amazing. Let\'s grab coffee there this week!',
-        timestamp: '10:39 AM'
-      }
-    ]
+        text: "Oh, I love Sextant! Their Ethiopian pour-over is amazing. Let's grab coffee there this week!",
+        timestamp: '10:39 AM',
+      },
+    ],
   });
 
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [matchModalProfile, setMatchModalProfile] = useState<Profile | null>(
+    null
+  );
+  const [safetyProfile, setSafetyProfile] = useState<Profile | null>(null);
 
-  const handleLogin = (authenticatedUser: Profile) => {
-    setUser(authenticatedUser);
-  };
+  const profilesById = useMemo(() => {
+    const map: Record<string, Profile> = {};
+    [...MOCK_PROFILES, ...feed, ...chatProfiles].forEach((p) => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [feed, chatProfiles]);
 
-  const handleLogout = () => {
-    setUser(null);
-    setActiveTab('radar');
-    setLikes([]);
-    setMatches(['1']);
-    setActiveChatId(null);
-  };
+  // Server-side state is only meaningful once a real Supabase session exists.
+  useEffect(() => {
+    if (demoMode || !user) return;
+    let alive = true;
 
-  const handleLike = (targetProfile: Profile) => {
-    if (likes.includes(targetProfile.id)) return;
-    
-    const newLikes = [...likes, targetProfile.id];
-    setLikes(newLikes);
+    Promise.all([
+      fetchPreferences(user.id),
+      fetchBlockedIds(),
+      fetchIncomingLikes(),
+    ]).then(([prefs, blocked, incoming]) => {
+      if (!alive) return;
+      setPreferences(prefs);
+      setBlockedIds(blocked);
+      setIncomingLikes(incoming);
+    });
 
-    // Let's make every 1st and 2nd degree match automatically for the demo to make it engaging
-    if (targetProfile.connectionDegree <= 2) {
-      // Trigger a match!
-      const newMatches = [...matches, targetProfile.id];
-      setMatches(newMatches);
-      
-      // Add profile to chat profiles list
-      if (!chatProfiles.some(p => p.id === targetProfile.id)) {
-        setChatProfiles([targetProfile, ...chatProfiles]);
+    return () => {
+      alive = false;
+    };
+  }, [demoMode, user]);
+
+  useEffect(() => {
+    if (demoMode) {
+      setFeed(MOCK_PROFILES);
+      return;
+    }
+    let alive = true;
+    fetchDiscoveryFeed(preferences).then((rows) => {
+      if (alive) setFeed(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [demoMode, preferences]);
+
+  const deckProfiles = useMemo(() => {
+    const seen = new Set([...likes, ...passes, ...blockedIds]);
+    const base = demoMode ? filterProfilesLocally(feed, preferences) : feed;
+    return base.filter((p) => !seen.has(p.id));
+  }, [feed, preferences, likes, passes, blockedIds, demoMode]);
+
+  const visibleIncomingLikes = useMemo(
+    () => incomingLikes.filter((like) => !blockedIds.includes(like.profileId)),
+    [incomingLikes, blockedIds]
+  );
+
+  const registerMatch = useCallback((target: Profile) => {
+    setMatches((prev) =>
+      prev.includes(target.id) ? prev : [...prev, target.id]
+    );
+    setChatProfiles((prev) =>
+      prev.some((p) => p.id === target.id) ? prev : [target, ...prev]
+    );
+    setMessages((prev) =>
+      prev[target.id]
+        ? prev
+        : {
+            ...prev,
+            [target.id]: [
+              {
+                id: `init-${target.id}`,
+                senderId: target.id,
+                text: target.icebreaker,
+                timestamp: nowLabel(),
+              },
+            ],
+          }
+    );
+    confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+    setMatchModalProfile(target);
+  }, []);
+
+  const handleSwipe = useCallback(
+    async (target: Profile, direction: SwipeDirection) => {
+      setSwipeHistory((prev) => [...prev, target.id]);
+      setIncomingLikes((prev) =>
+        prev.filter((like) => like.profileId !== target.id)
+      );
+
+      if (direction === 'pass') {
+        setPasses((prev) =>
+          prev.includes(target.id) ? prev : [...prev, target.id]
+        );
+        return;
       }
 
-      // Add initial icebreaker from match
-      setMessages(prev => ({
-        ...prev,
-        [targetProfile.id]: [
-          {
-            id: `init-${targetProfile.id}`,
-            senderId: targetProfile.id,
-            text: targetProfile.icebreaker,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }
-        ]
-      }));
+      setLikes((prev) =>
+        prev.includes(target.id) ? prev : [...prev, target.id]
+      );
 
-      // Celebrate with confetti
-      confetti({
-        particleCount: 150,
-        spread: 80,
-        origin: { y: 0.6 }
+      const likedBack = visibleIncomingLikes.some(
+        (like) => like.profileId === target.id
+      );
+      const isMatch = demoMode
+        ? direction === 'super' || likedBack || target.connectionDegree <= 2
+        : (await recordSwipe(target.id, direction)).isMatch;
+
+      if (isMatch) {
+        registerMatch(target);
+      } else {
+        showToast(`Request sent to ${target.name.split(' ')[0]}`, 'info');
+      }
+    },
+    [demoMode, visibleIncomingLikes, registerMatch, showToast]
+  );
+
+  const handleUndo = useCallback(async () => {
+    const lastId = swipeHistory[swipeHistory.length - 1];
+    if (!lastId) return;
+    setSwipeHistory((prev) => prev.slice(0, -1));
+    setLikes((prev) => prev.filter((id) => id !== lastId));
+    setPasses((prev) => prev.filter((id) => id !== lastId));
+    if (!demoMode) await undoLastSwipe();
+  }, [swipeHistory, demoMode]);
+
+  const handleReport = useCallback(
+    async (target: Profile, reason: ReportReason, details: string) => {
+      setSafetyProfile(null);
+      if (!demoMode) await reportUser(target.id, reason, details);
+      showToast('Report sent to our safety team. Thank you.', 'success');
+    },
+    [demoMode, showToast]
+  );
+
+  const handleBlock = useCallback(
+    async (target: Profile) => {
+      setSafetyProfile(null);
+      setBlockedIds((prev) =>
+        prev.includes(target.id) ? prev : [...prev, target.id]
+      );
+      setMatches((prev) => prev.filter((id) => id !== target.id));
+      setChatProfiles((prev) => prev.filter((p) => p.id !== target.id));
+      setIncomingLikes((prev) =>
+        prev.filter((like) => like.profileId !== target.id)
+      );
+      setMessages((prev) => {
+        const next = { ...prev };
+        delete next[target.id];
+        return next;
       });
-      
-      // Navigate to chat/connections or show prompt
-      alert(`It's a Match! You and ${targetProfile.name} are now connected via LinkedIn. Go chat!`);
+      setActiveChatId((prev) => (prev === target.id ? null : prev));
+      if (!demoMode) await blockUser(target.id);
+      showToast(`${target.name.split(' ')[0]} has been blocked.`, 'success');
+    },
+    [demoMode, showToast]
+  );
+
+  const handleUnblock = useCallback(
+    async (profileId: string) => {
+      setBlockedIds((prev) => prev.filter((id) => id !== profileId));
+      if (!demoMode) await unblockUser(profileId);
+      showToast('Unblocked. They can appear on your radar again.', 'info');
+    },
+    [demoMode, showToast]
+  );
+
+  const handlePreferencesChange = useCallback(
+    (next: DatingPreferences) => {
+      setPreferences(next);
+      if (!demoMode && user) void savePreferences(user.id, next);
+    },
+    [demoMode, user]
+  );
+
+  const handleDeleteAccount = useCallback(async () => {
+    if (await deleteMyAccount()) {
+      await signOut();
+      setOverlay('none');
+      showToast('Your account and data have been deleted.', 'success');
+    } else {
+      showToast('Could not delete the account. Please try again.', 'error');
     }
-  };
+  }, [signOut, showToast]);
 
-  const sendMessage = (profileId: string, text: string) => {
-    const newMsg: ChatMessage = {
-      id: Math.random().toString(),
-      senderId: 'currentUser',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+  const sendMessage = useCallback((profileId: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
 
-    setMessages(prev => ({
+    setMessages((prev) => ({
       ...prev,
-      [profileId]: [...(prev[profileId] || []), newMsg]
+      [profileId]: [
+        ...(prev[profileId] || []),
+        {
+          id: Math.random().toString(36).slice(2),
+          senderId: 'currentUser',
+          text: trimmed,
+          timestamp: nowLabel(),
+        },
+      ],
     }));
 
-    // Trigger simulated reply from connection after a short delay
     setTimeout(() => {
-      const replyMsg: ChatMessage = {
-        id: Math.random().toString(),
-        senderId: profileId,
-        text: `That sounds interesting! Let's talk more details. What days work best for you?`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages(prev => ({
+      setMessages((prev) => ({
         ...prev,
-        [profileId]: [...(prev[profileId] || []), replyMsg]
+        [profileId]: [
+          ...(prev[profileId] || []),
+          {
+            id: Math.random().toString(36).slice(2),
+            senderId: profileId,
+            text: "That sounds interesting! Let's talk more details. What days work best for you?",
+            timestamp: nowLabel(),
+          },
+        ],
       }));
     }, 2000);
-  };
+  }, []);
+
+  const openChatWith = useCallback((profileId: string) => {
+    setActiveChatId(profileId);
+    setActiveTab('chat');
+    setOverlay('none');
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={styles.splash}>
+        <ActivityIndicator size="large" color={COLORS.accentNeon} />
+        <Text style={styles.splashText}>Restoring your session…</Text>
+      </View>
+    );
+  }
+
+  if (!profile) {
+    return <LoginScreen onLoginSuccess={signInAsDemoUser} />;
+  }
+
+  if (needsOnboarding) {
+    return <OnboardingScreen seed={profile} onComplete={completeOnboarding} />;
+  }
+
+  if (overlay === 'likes') {
+    return (
+      <LikesScreen
+        likes={visibleIncomingLikes}
+        profilesById={profilesById}
+        onLikeBack={(target) => {
+          setOverlay('none');
+          void handleSwipe(target, 'like');
+        }}
+        onPass={(target) => void handleSwipe(target, 'pass')}
+        onBack={() => setOverlay('none')}
+      />
+    );
+  }
+
+  if (overlay === 'settings') {
+    return (
+      <SettingsScreen
+        preferences={preferences}
+        onChange={handlePreferencesChange}
+        blockedProfiles={blockedIds
+          .map((id) => profilesById[id])
+          .filter(Boolean)}
+        onUnblock={handleUnblock}
+        onSignOut={() => {
+          setOverlay('none');
+          setActiveTab('radar');
+          void signOut();
+        }}
+        onDeleteAccount={() => void handleDeleteAccount()}
+        onBack={() => setOverlay('none')}
+        authSummary={
+          demoMode
+            ? 'Demo mode — no Supabase project connected.'
+            : `Signed in with ${user?.app_metadata?.provider ?? 'OAuth'} as ${
+                user?.email ?? profile.name
+              }.`
+        }
+      />
+    );
+  }
 
   const renderActiveScreen = () => {
     switch (activeTab) {
       case 'radar':
-        return <RadarScreen onLike={handleLike} likedIds={likes} matchesIds={matches} />;
+        return (
+          <RadarScreen
+            onLike={(target) => void handleSwipe(target, 'like')}
+            likedIds={likes}
+            matchesIds={matches}
+          />
+        );
+      case 'discover':
+        return (
+          <DiscoverScreen
+            profiles={deckProfiles}
+            onSwipe={(target, direction) => void handleSwipe(target, direction)}
+            onUndo={() => void handleUndo()}
+            canUndo={swipeHistory.length > 0}
+            onReport={setSafetyProfile}
+            onOpenFilters={() => setOverlay('settings')}
+          />
+        );
       case 'connections':
         return (
           <ConnectionsScreen
-            matches={MOCK_PROFILES.filter(p => matches.includes(p.id))}
-            onChatPress={(profileId) => {
-              setActiveChatId(profileId);
-              setActiveTab('chat');
-            }}
+            matches={matches.map((id) => profilesById[id]).filter(Boolean)}
+            onChatPress={openChatWith}
+            likesCount={visibleIncomingLikes.length}
+            onOpenLikes={() => setOverlay('likes')}
           />
         );
       case 'chat':
@@ -170,123 +471,108 @@ export default function App() {
         );
       case 'profile':
         return (
-          <SafeAreaView style={styles.profileContainer}>
-            <View style={styles.profileHeader}>
-              <Text style={styles.profileTitle}>My LinkedIn Identity</Text>
-            </View>
-            <View style={styles.profileContent}>
-              <Image source={{ uri: CURRENT_USER.avatar }} style={styles.profileAvatar} />
-              <Text style={styles.profileName}>{CURRENT_USER.name}</Text>
-              <Text style={styles.profileHeadline}>{CURRENT_USER.headline}</Text>
-              <Text style={styles.profileCompany}>{CURRENT_USER.company} • {CURRENT_USER.location}</Text>
-              
-              <View style={styles.profileDivider} />
-              
-              <View style={styles.profileInfoBox}>
-                <Text style={styles.infoLabel}>Bio</Text>
-                <Text style={styles.infoValue}>{CURRENT_USER.bio}</Text>
-              </View>
-
-              <View style={styles.profileInfoBox}>
-                <Text style={styles.infoLabel}>Interests</Text>
-                <View style={styles.interestsContainer}>
-                  {CURRENT_USER.interests.map(interest => (
-                    <View key={interest} style={styles.interestTag}>
-                      <Text style={styles.interestTagText}>{interest}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-                <Text style={styles.logoutButtonText}>Disconnect LinkedIn SSO</Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
+          <ProfileScreen
+            profile={profile}
+            onSave={(patch) => void saveProfile(patch)}
+            onOpenSettings={() => setOverlay('settings')}
+            verifiedProvider={profile.verified ? 'LinkedIn' : null}
+          />
         );
     }
   };
 
   return (
-    <View style={styles.desktopShell}>
-      {/* Sleek Mobile Frame */}
-      <View style={styles.phoneFrame}>
-        {/* Status Bar */}
-        <View style={styles.statusBar}>
-          <Text style={styles.statusBarTime}>9:41</Text>
-          <View style={styles.statusBarIcons}>
-            <Signal size={14} color="#ffffff" style={styles.statusIcon} />
-            <Wifi size={14} color="#ffffff" style={styles.statusIcon} />
-            <Battery size={16} color="#ffffff" style={styles.statusIcon} />
-          </View>
-        </View>
+    <View style={{ flex: 1 }}>
+      <View style={styles.screenContent}>{renderActiveScreen()}</View>
 
-        {/* Screen Area */}
-        <View style={styles.screenArea}>
-          {!user ? (
-            <LoginScreen onLoginSuccess={handleLogin} />
-          ) : (
-            <View style={{ flex: 1 }}>
-              <View style={styles.screenContent}>
-                {renderActiveScreen()}
-              </View>
+      <View style={styles.tabBar}>
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.key;
+          const badgeCount =
+            tab.key === 'connections'
+              ? matches.length + visibleIncomingLikes.length
+              : 0;
 
-              {/* Bottom Tab Bar */}
-              <View style={styles.tabBar}>
-                <TouchableOpacity
-                  style={[styles.tabItem, activeTab === 'radar' && styles.tabItemActive]}
-                  onPress={() => {
-                    setActiveTab('radar');
-                    setActiveChatId(null);
-                  }}
-                >
-                  <Compass size={22} color={activeTab === 'radar' ? COLORS.accentNeon : COLORS.textSecondary} />
-                  <Text style={[styles.tabLabel, activeTab === 'radar' && styles.tabLabelActive]}>Radar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.tabItem, activeTab === 'connections' && styles.tabItemActive]}
-                  onPress={() => {
-                    setActiveTab('connections');
-                    setActiveChatId(null);
-                  }}
-                >
-                  <Users size={22} color={activeTab === 'connections' ? COLORS.accentNeon : COLORS.textSecondary} />
-                  <Text style={[styles.tabLabel, activeTab === 'connections' && styles.tabLabelActive]}>Matches</Text>
-                  {matches.length > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{matches.length}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.tabItem, activeTab === 'chat' && styles.tabItemActive]}
-                  onPress={() => setActiveTab('chat')}
-                >
-                  <MessageSquare size={22} color={activeTab === 'chat' ? COLORS.accentNeon : COLORS.textSecondary} />
-                  <Text style={[styles.tabLabel, activeTab === 'chat' && styles.tabLabelActive]}>Chat</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.tabItem, activeTab === 'profile' && styles.tabItemActive]}
-                  onPress={() => {
-                    setActiveTab('profile');
-                    setActiveChatId(null);
-                  }}
-                >
-                  <User size={22} color={activeTab === 'profile' ? COLORS.accentNeon : COLORS.textSecondary} />
-                  <Text style={[styles.tabLabel, activeTab === 'profile' && styles.tabLabelActive]}>Profile</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* iPhone Home Indicator */}
-        <View style={styles.homeIndicator} />
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.tabItem, isActive && styles.tabItemActive]}
+              onPress={() => {
+                setActiveTab(tab.key);
+                if (tab.key !== 'chat') setActiveChatId(null);
+              }}
+            >
+              <Icon
+                size={20}
+                color={isActive ? COLORS.accentNeon : COLORS.textSecondary}
+              />
+              <Text
+                style={[styles.tabLabel, isActive && styles.tabLabelActive]}
+              >
+                {tab.label}
+              </Text>
+              {badgeCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{badgeCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
+
+      <MatchModal
+        visible={matchModalProfile !== null}
+        match={matchModalProfile}
+        currentUserAvatar={profile.avatar || CURRENT_USER.avatar}
+        onSendMessage={() => {
+          const target = matchModalProfile;
+          setMatchModalProfile(null);
+          if (target) openChatWith(target.id);
+        }}
+        onKeepSwiping={() => setMatchModalProfile(null)}
+      />
+
+      <SafetySheet
+        visible={safetyProfile !== null}
+        profile={safetyProfile}
+        onClose={() => setSafetyProfile(null)}
+        onReport={(target, reason, details) =>
+          void handleReport(target, reason, details)
+        }
+        onBlock={(target) => void handleBlock(target)}
+      />
     </View>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <View style={styles.desktopShell}>
+        {/* Sleek Mobile Frame */}
+        <View style={styles.phoneFrame}>
+          <View style={styles.statusBar}>
+            <Text style={styles.statusBarTime}>9:41</Text>
+            <View style={styles.statusBarIcons}>
+              <Signal size={14} color="#ffffff" style={styles.statusIcon} />
+              <Wifi size={14} color="#ffffff" style={styles.statusIcon} />
+              <Battery size={16} color="#ffffff" style={styles.statusIcon} />
+            </View>
+          </View>
+
+          <View style={styles.screenArea}>
+            <ToastProvider>
+              <LinkRadar />
+            </ToastProvider>
+          </View>
+
+          {/* iPhone Home Indicator */}
+          <View style={styles.homeIndicator} />
+        </View>
+      </View>
+    </AuthProvider>
   );
 }
 
@@ -307,7 +593,8 @@ const styles: any = StyleSheet.create({
     borderRadius: 44,
     borderWidth: 10,
     borderColor: '#1e293b',
-    boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 40px rgba(6, 182, 212, 0.1)',
+    boxShadow:
+      '0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 40px rgba(6, 182, 212, 0.1)',
     position: 'relative',
     overflow: 'hidden',
     display: 'flex',
@@ -342,7 +629,18 @@ const styles: any = StyleSheet.create({
   },
   screenContent: {
     flex: 1,
-    paddingBottom: 0,
+  },
+  splash: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.bgDark,
+  },
+  splashText: {
+    fontFamily: 'Outfit',
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 14,
   },
   tabBar: {
     height: 72,
@@ -357,6 +655,7 @@ const styles: any = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
+    cursor: 'pointer',
   },
   tabItemActive: {
     borderTopWidth: 2,
@@ -364,7 +663,7 @@ const styles: any = StyleSheet.create({
     marginTop: -2,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: COLORS.textSecondary,
     marginTop: 4,
     fontWeight: '500',
@@ -376,8 +675,8 @@ const styles: any = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: 10,
-    right: '25%',
+    top: 8,
+    right: '18%',
     backgroundColor: COLORS.heart,
     borderRadius: 8,
     minWidth: 16,
@@ -401,117 +700,4 @@ const styles: any = StyleSheet.create({
     backgroundColor: '#64748b',
     zIndex: 99,
   },
-  profileContainer: {
-    flex: 1,
-    backgroundColor: COLORS.bgDark,
-  },
-  profileHeader: {
-    height: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-  },
-  profileTitle: {
-    fontFamily: 'Outfit',
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  profileContent: {
-    flex: 1,
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 3,
-    borderColor: COLORS.primary,
-    marginBottom: 16,
-    boxShadow: '0 0 20px rgba(0, 119, 181, 0.4)',
-  },
-  profileName: {
-    fontFamily: 'Outfit',
-    fontSize: 24,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
-  },
-  profileHeadline: {
-    fontFamily: 'Outfit',
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.accentNeon,
-    marginTop: 4,
-  },
-  profileCompany: {
-    fontFamily: 'Outfit',
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-  profileDivider: {
-    width: '100%',
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginVertical: 24,
-  },
-  profileInfoBox: {
-    width: '100%',
-    marginBottom: 20,
-    alignSelf: 'flex-start',
-  },
-  infoLabel: {
-    fontFamily: 'Outfit',
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 6,
-  },
-  infoValue: {
-    fontFamily: 'Outfit',
-    fontSize: 14,
-    color: COLORS.textPrimary,
-    lineHeight: 20,
-  },
-  interestsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  interestTag: {
-    backgroundColor: 'rgba(6, 182, 212, 0.1)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(6, 182, 212, 0.2)',
-  },
-  interestTagText: {
-    fontFamily: 'Outfit',
-    fontSize: 12,
-    color: COLORS.accentNeon,
-    fontWeight: '600',
-  },
-  logoutButton: {
-    marginTop: 'auto',
-    width: '100%',
-    backgroundColor: '#dc2626',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  },
-  logoutButtonText: {
-    fontFamily: 'Outfit',
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-  }
 });

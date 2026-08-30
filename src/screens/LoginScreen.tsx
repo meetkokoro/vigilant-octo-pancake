@@ -7,35 +7,74 @@ import {
   Modal,
   Image,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
 } from 'react-native';
 import { COLORS, GLOBAL_STYLES } from '../styles/theme';
-import { Linkedin, Compass, Shield, Users, Building, MapPin } from 'lucide-react';
+import {
+  Linkedin,
+  Compass,
+  Shield,
+  Users,
+  Building,
+  MapPin,
+  Chrome,
+  Apple,
+  AlertTriangle,
+  Smartphone,
+} from 'lucide-react';
 import { CURRENT_USER, Profile } from '../utils/mockData';
+import { useAuth } from '../context/AuthContext';
+import { OAuthProvider } from '../lib/supabase';
+import PhoneAuthSheet from '../components/PhoneAuthSheet';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: Profile) => void;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+  const {
+    demoMode,
+    authError,
+    signInWithProvider,
+    sendPhoneOtp,
+    verifyPhoneOtp,
+  } = useAuth();
   const [showSSOModal, setShowSSOModal] = useState(false);
+  const [showPhoneSheet, setShowPhoneSheet] = useState(false);
   const [loadingSSO, setLoadingSSO] = useState(false);
-  const [ssoStep, setSSOStep] = useState<'prompt' | 'authorizing' | 'success'>('prompt');
+  const [pendingProvider, setPendingProvider] = useState<OAuthProvider | null>(
+    null
+  );
+  const [ssoStep, setSSOStep] = useState<'prompt' | 'authorizing' | 'success'>(
+    'prompt'
+  );
 
-  const handleLinkedInSSO = () => {
-    setShowSSOModal(true);
-    setSSOStep('prompt');
+  /**
+   * With Supabase configured this hands off to the provider's real consent
+   * screen. Without credentials it replays the scripted OAuth walkthrough so
+   * the prototype still works offline.
+   */
+  const handleSignIn = async (provider: OAuthProvider) => {
+    if (demoMode) {
+      setShowSSOModal(true);
+      setSSOStep('prompt');
+      return;
+    }
+
+    setPendingProvider(provider);
+    await signInWithProvider(provider);
+    setPendingProvider(null);
   };
 
   const handleAuthorize = () => {
     setSSOStep('authorizing');
     setLoadingSSO(true);
-    
+
     // Simulate LinkedIn OAuth 2.0 Auth Code & Access Token Swap
     setTimeout(() => {
       setSSOStep('success');
       setLoadingSSO(false);
-      
+
       // Complete login after a short delay showing success screen
       setTimeout(() => {
         setShowSSOModal(false);
@@ -54,9 +93,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         {/* Branding header */}
         <View style={styles.brandContainer}>
           <View style={styles.radarLogo}>
-            <Compass size={40} color={COLORS.accentNeon} style={styles.compassIcon} />
+            <Compass
+              size={40}
+              color={COLORS.accentNeon}
+              style={styles.compassIcon}
+            />
             <View style={styles.radarPulseRing} />
-            <View style={[styles.radarPulseRing, { transform: [{ scale: 1.5 }], opacity: 0.15 }]} />
+            <View
+              style={[
+                styles.radarPulseRing,
+                { transform: [{ scale: 1.5 }], opacity: 0.15 },
+              ]}
+            />
           </View>
           <Text style={styles.appName}>LinkRadar</Text>
           <Text style={styles.appSubtitle}>Professional Proximity Dating</Text>
@@ -70,7 +118,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </View>
             <View style={styles.featureTextContainer}>
               <Text style={styles.featureTitle}>LinkedIn Verification</Text>
-              <Text style={styles.featureDesc}>Authenticate via LinkedIn. Zero spam, real professionals.</Text>
+              <Text style={styles.featureDesc}>
+                Authenticate via LinkedIn. Zero spam, real professionals.
+              </Text>
             </View>
           </View>
 
@@ -80,7 +130,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </View>
             <View style={styles.featureTextContainer}>
               <Text style={styles.featureTitle}>Corporate Filter</Text>
-              <Text style={styles.featureDesc}>Discover matches within your corporation or partner network.</Text>
+              <Text style={styles.featureDesc}>
+                Discover matches within your corporation or partner network.
+              </Text>
             </View>
           </View>
 
@@ -90,7 +142,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </View>
             <View style={styles.featureTextContainer}>
               <Text style={styles.featureTitle}>Hyper-local Radar</Text>
-              <Text style={styles.featureDesc}>Identify matches nearby in real time with exact distance control.</Text>
+              <Text style={styles.featureDesc}>
+                Identify matches nearby in real time with exact distance
+                control.
+              </Text>
             </View>
           </View>
         </View>
@@ -99,15 +154,90 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         <View style={styles.actionContainer}>
           <TouchableOpacity
             style={styles.linkedinButton}
-            onPress={handleLinkedInSSO}
+            onPress={() => handleSignIn('linkedin_oidc')}
             activeOpacity={0.8}
+            disabled={pendingProvider !== null}
           >
             <Linkedin size={22} color="#ffffff" style={styles.btnIcon} />
-            <Text style={styles.linkedinButtonText}>Sign In with LinkedIn</Text>
+            <Text style={styles.linkedinButtonText}>
+              {pendingProvider === 'linkedin_oidc'
+                ? 'Redirecting…'
+                : 'Sign In with LinkedIn'}
+            </Text>
           </TouchableOpacity>
-          
+
+          <TouchableOpacity
+            style={styles.phoneButton}
+            onPress={() => setShowPhoneSheet(true)}
+            activeOpacity={0.8}
+          >
+            <Smartphone
+              size={20}
+              color={COLORS.accentNeon}
+              style={styles.btnIcon}
+            />
+            <Text style={styles.phoneButtonText}>
+              Sign up with mobile number
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or continue with</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <View style={styles.providerRow}>
+            <TouchableOpacity
+              style={styles.providerButton}
+              onPress={() => handleSignIn('google')}
+              activeOpacity={0.8}
+              disabled={pendingProvider !== null}
+            >
+              <Chrome
+                size={18}
+                color={COLORS.textPrimary}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.providerButtonText}>Google</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.providerButton}
+              onPress={() => handleSignIn('apple')}
+              activeOpacity={0.8}
+              disabled={pendingProvider !== null}
+            >
+              <Apple
+                size={18}
+                color={COLORS.textPrimary}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.providerButtonText}>Apple</Text>
+            </TouchableOpacity>
+          </View>
+
+          {authError && (
+            <View style={styles.errorBanner}>
+              <AlertTriangle
+                size={14}
+                color={COLORS.heart}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.errorText}>{authError}</Text>
+            </View>
+          )}
+
+          {demoMode && (
+            <Text style={styles.demoNotice}>
+              Demo mode — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to
+              .env.local to enable real OAuth.
+            </Text>
+          )}
+
           <Text style={styles.disclaimerText}>
-            We'll never post to your feed. By signing in, you agree to our Terms and Privacy Policy.
+            We'll never post to your feed. You must be 18+. By signing in, you
+            agree to our Terms and Privacy Policy.
           </Text>
         </View>
       </View>
@@ -130,9 +260,14 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </View>
               <View style={styles.ssoUrlBar}>
                 <Lock size={12} color="#8e8e93" />
-                <Text style={styles.ssoUrlText}>api.linkedin.com/oauth/v2/authorization</Text>
+                <Text style={styles.ssoUrlText}>
+                  api.linkedin.com/oauth/v2/authorization
+                </Text>
               </View>
-              <TouchableOpacity onPress={() => setShowSSOModal(false)} style={styles.closeButton}>
+              <TouchableOpacity
+                onPress={() => setShowSSOModal(false)}
+                style={styles.closeButton}
+              >
                 <Text style={styles.closeButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -141,7 +276,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               <View style={styles.ssoContent}>
                 <View style={styles.ssoLogoRow}>
                   <Image
-                    source={{ uri: 'https://cdn-icons-png.flaticon.com/512/174/174857.png' }}
+                    source={{
+                      uri: 'https://cdn-icons-png.flaticon.com/512/174/174857.png',
+                    }}
                     style={styles.linkedinLogo}
                   />
                   <Text style={styles.connectPlus}>+</Text>
@@ -150,32 +287,47 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   </View>
                 </View>
 
-                <Text style={styles.ssoHeadline}>LinkRadar requests access to your LinkedIn profile:</Text>
-                
+                <Text style={styles.ssoHeadline}>
+                  LinkRadar requests access to your LinkedIn profile:
+                </Text>
+
                 <View style={styles.permissionList}>
                   <View style={styles.permissionItem}>
-                    <Users size={16} color={COLORS.textSecondary} style={{ marginRight: 10 }} />
-                    <Text style={styles.permissionText}>Use your name, profile photo, and headline.</Text>
+                    <Users
+                      size={16}
+                      color={COLORS.textSecondary}
+                      style={{ marginRight: 10 }}
+                    />
+                    <Text style={styles.permissionText}>
+                      Use your name, profile photo, and headline.
+                    </Text>
                   </View>
                   <View style={styles.permissionItem}>
-                    <Building size={16} color={COLORS.textSecondary} style={{ marginRight: 10 }} />
-                    <Text style={styles.permissionText}>Use your current company, job title, and location.</Text>
+                    <Building
+                      size={16}
+                      color={COLORS.textSecondary}
+                      style={{ marginRight: 10 }}
+                    />
+                    <Text style={styles.permissionText}>
+                      Use your current company, job title, and location.
+                    </Text>
                   </View>
                 </View>
 
                 <Text style={styles.ssoSafetyInfo}>
-                  Authorization does not permit LinkRadar to publish posts or message connections on your behalf.
+                  Authorization does not permit LinkRadar to publish posts or
+                  message connections on your behalf.
                 </Text>
 
                 <View style={styles.ssoActionButtons}>
-                  <TouchableOpacity 
-                    style={[styles.ssoBtn, styles.ssoBtnCancel]} 
+                  <TouchableOpacity
+                    style={[styles.ssoBtn, styles.ssoBtnCancel]}
                     onPress={() => setShowSSOModal(false)}
                   >
                     <Text style={styles.ssoBtnCancelText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.ssoBtn, styles.ssoBtnAllow]} 
+                  <TouchableOpacity
+                    style={[styles.ssoBtn, styles.ssoBtnAllow]}
                     onPress={handleAuthorize}
                   >
                     <Text style={styles.ssoBtnAllowText}>Allow Access</Text>
@@ -187,13 +339,18 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {ssoStep === 'authorizing' && (
               <View style={styles.ssoMiddleState}>
                 <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.ssoStatusText}>Securing OAuth token...</Text>
-                <Text style={styles.ssoSubstatusText}>
-                  Requesting access token & profile details from LinkedIn Gateway
+                <Text style={styles.ssoStatusText}>
+                  Securing OAuth token...
                 </Text>
-                
+                <Text style={styles.ssoSubstatusText}>
+                  Requesting access token & profile details from LinkedIn
+                  Gateway
+                </Text>
+
                 <View style={styles.codeSnippetBox}>
-                  <Text style={styles.codeSnippetHeader}>OAuth 2.0 Integration Under the Hood:</Text>
+                  <Text style={styles.codeSnippetHeader}>
+                    OAuth 2.0 Integration Under the Hood:
+                  </Text>
                   <Text style={styles.codeSnippetText}>
                     {`// Step 1: Redirect to authorize endpoint\nGET https://www.linkedin.com/oauth/v2/authorization\n?response_type=code&client_id=linkradar_client_id\n&redirect_uri=linkradar://oauth-callback&scope=openid%20profile%20email\n\n// Step 2: Swap authorization_code for token\nPOST https://www.linkedin.com/oauth/v2/accessToken\nheaders: { 'Content-Type': 'application/x-www-form-urlencoded' }\nbody: { grant_type: 'authorization_code', code, client_id, client_secret }`}
                   </Text>
@@ -206,15 +363,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <View style={styles.successBadge}>
                   <Shield size={40} color={COLORS.success} />
                 </View>
-                <Text style={[styles.ssoStatusText, { color: COLORS.success }]}>Authentication Successful</Text>
+                <Text style={[styles.ssoStatusText, { color: COLORS.success }]}>
+                  Authentication Successful
+                </Text>
                 <Text style={styles.ssoSubstatusText}>
-                  Welcome, {CURRENT_USER.name}! Importing your profile details from {CURRENT_USER.company}...
+                  Welcome, {CURRENT_USER.name}! Importing your profile details
+                  from {CURRENT_USER.company}...
                 </Text>
               </View>
             )}
           </View>
         </View>
       </Modal>
+
+      <PhoneAuthSheet
+        visible={showPhoneSheet}
+        demoMode={demoMode}
+        onClose={() => setShowPhoneSheet(false)}
+        onSendCode={sendPhoneOtp}
+        onVerifyCode={verifyPhoneOtp}
+      />
     </View>
   );
 }
@@ -222,7 +390,15 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 // Simple Helper to bypass lock icon import in standard lucide
 function Lock({ size, color }: { size: number; color: string }) {
   return (
-    <span style={{ fontSize: size, color: color, marginRight: 4, display: 'inline-flex', alignItems: 'center' }}>
+    <span
+      style={{
+        fontSize: size,
+        color: color,
+        marginRight: 4,
+        display: 'inline-flex',
+        alignItems: 'center',
+      }}
+    >
       🔒
     </span>
   );
@@ -598,5 +774,90 @@ const styles: any = StyleSheet.create({
     color: '#a1a1aa',
     lineHeight: 14,
     whiteSpace: 'pre-wrap',
-  }
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginVertical: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    fontFamily: 'Outfit',
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginHorizontal: 10,
+  },
+  providerRow: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  providerButton: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 13,
+    marginHorizontal: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    cursor: 'pointer',
+  },
+  providerButtonText: {
+    fontFamily: 'Outfit',
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(236,72,153,0.35)',
+    backgroundColor: 'rgba(236,72,153,0.08)',
+  },
+  errorText: {
+    flex: 1,
+    fontFamily: 'Outfit',
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.heart,
+  },
+  demoNotice: {
+    fontFamily: 'Outfit',
+    fontSize: 11,
+    lineHeight: 16,
+    color: COLORS.warning,
+    textAlign: 'center',
+    marginTop: 14,
+    paddingHorizontal: 10,
+  },
+  phoneButton: {
+    width: '100%',
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(6,182,212,0.4)',
+    backgroundColor: 'rgba(6,182,212,0.08)',
+    cursor: 'pointer',
+  },
+  phoneButtonText: {
+    fontFamily: 'Outfit',
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.accentNeon,
+  },
 } as any);

@@ -1,14 +1,15 @@
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  TouchableOpacity
-} from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { COLORS } from '../styles/theme';
 import { Profile } from '../utils/mockData';
-import { X, Heart, MessageSquare, Linkedin, Landmark, MapPin } from 'lucide-react';
+import {
+  X,
+  Heart,
+  MessageSquare,
+  Linkedin,
+  Landmark,
+  MapPin,
+} from 'lucide-react';
 
 interface ProfileCardProps {
   profile: Profile;
@@ -23,19 +24,23 @@ export default function ProfileCard({
   onLike,
   onPass,
   isAlreadyLiked,
-  isAlreadyMatched
+  isAlreadyMatched,
 }: ProfileCardProps) {
   return (
     <View style={styles.card}>
       {/* Top Banner showing connection level */}
-      <View style={[
-        styles.degreeBanner, 
-        profile.connectionDegree === 1 ? styles.degreeBanner1 : styles.degreeBannerOther
-      ]}>
+      <View
+        style={[
+          styles.degreeBanner,
+          profile.connectionDegree === 1
+            ? styles.degreeBanner1
+            : styles.degreeBannerOther,
+        ]}
+      >
         <Linkedin size={12} color="#ffffff" style={{ marginRight: 5 }} />
         <Text style={styles.degreeBannerText}>
-          {profile.connectionDegree === 1 
-            ? '1st Degree Connection on LinkedIn' 
+          {profile.connectionDegree === 1
+            ? '1st Degree Connection on LinkedIn'
             : `${profile.connectionDegree}nd Degree Connection`}
         </Text>
       </View>
@@ -44,19 +49,29 @@ export default function ProfileCard({
         {/* Profile Info Header */}
         <View style={styles.row}>
           <Image source={{ uri: profile.avatar }} style={styles.avatar} />
-          
+
           <View style={styles.headerText}>
             <Text style={styles.name}>{profile.name}</Text>
             <Text style={styles.headline}>{profile.headline}</Text>
-            
+
             <View style={styles.metaRow}>
-              <Landmark size={14} color={COLORS.accentNeon} style={{ marginRight: 4 }} />
+              <Landmark
+                size={14}
+                color={COLORS.accentNeon}
+                style={{ marginRight: 4 }}
+              />
               <Text style={styles.metaText}>{profile.company}</Text>
-              
+
               <Text style={styles.metaDot}>•</Text>
-              
-              <MapPin size={14} color={COLORS.heart} style={{ marginRight: 4 }} />
-              <Text style={styles.metaText}>{profile.distance} km ({profile.localityName})</Text>
+
+              <MapPin
+                size={14}
+                color={COLORS.heart}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.metaText}>
+                {profile.distance} km ({profile.localityName})
+              </Text>
             </View>
           </View>
         </View>
@@ -76,7 +91,7 @@ export default function ProfileCard({
 
         {/* Interests */}
         <View style={styles.interestsRow}>
-          {profile.interests.map(interest => (
+          {profile.interests.map((interest) => (
             <View key={interest} style={styles.interestTag}>
               <Text style={styles.interestTagText}>{interest}</Text>
             </View>
@@ -94,12 +109,16 @@ export default function ProfileCard({
           {isAlreadyMatched ? (
             <View style={styles.matchedStatusContainer}>
               <Text style={styles.matchedStatusText}>🎉 Linked Match!</Text>
-              <Text style={styles.matchedStatusSubtext}>You are connected. Send a message in Chat.</Text>
+              <Text style={styles.matchedStatusSubtext}>
+                You are connected. Send a message in Chat.
+              </Text>
             </View>
           ) : isAlreadyLiked ? (
             <View style={styles.likedStatusContainer}>
               <Text style={styles.likedStatusText}>Pending Response...</Text>
-              <Text style={styles.likedStatusSubtext}>Connection request sent via LinkedIn SSO</Text>
+              <Text style={styles.likedStatusSubtext}>
+                Connection request sent via LinkedIn SSO
+              </Text>
             </View>
           ) : (
             <>
@@ -343,5 +362,5 @@ const styles: any = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textSecondary,
     marginTop: 2,
-  }
+  },
 });

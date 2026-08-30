@@ -19,13 +19,14 @@ export const COLORS = {
   textPrimary: '#f3f4f6',
   textSecondary: '#94a3b8',
   textMuted: '#64748b',
-  textOnPrimary: '#ffffff'
+  textOnPrimary: '#ffffff',
 };
 
 export const GRADIENTS = {
   primary: 'linear-gradient(135deg, #0077b5 0%, #3b82f6 100%)',
-  radar: 'radial-gradient(circle, rgba(6,182,212,0.15) 0%, rgba(11,15,25,0) 70%)',
+  radar:
+    'radial-gradient(circle, rgba(6,182,212,0.15) 0%, rgba(11,15,25,0) 70%)',
   card: 'linear-gradient(180deg, rgba(21,28,46,0.8) 0%, rgba(11,15,25,0.95) 100%)',
   heart: 'linear-gradient(135deg, #ec4899 0%, #f43f5e 100%)',
-  neonBorder: 'linear-gradient(90deg, #0077b5, #06b6d4, #ec4899)'
+  neonBorder: 'linear-gradient(90deg, #0077b5, #06b6d4, #ec4899)',
 };
